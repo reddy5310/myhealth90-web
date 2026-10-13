@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base href="/myhealth90-web/">
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="MyHealth 90 — private 90-day health tracker. Your data stays on your phone.">
+  <meta name="theme-color" content="#0F766E">
+  <meta name="robots" content="noindex, nofollow">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="MyHealth 90">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <title>MyHealth 90</title>
+
+  <style>
+    html, body { margin: 0; height: 100%; background: #F4FBF9; }
+    @media (prefers-color-scheme: dark) { html, body { background: #0E1513; } }
+    #splash {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      font: 500 16px/1.4 Roboto, system-ui, sans-serif; color: #0F766E;
+    }
+    #splash img { width: 96px; height: 96px; border-radius: 22px; }
+    #splash .bar { width: 120px; height: 4px; border-radius: 2px; background: #CDE8E3; overflow: hidden; }
+    #splash .bar::after {
+      content: ''; display: block; width: 40%; height: 100%; background: #0F766E;
+      animation: slide 1s ease-in-out infinite alternate;
+    }
+    @keyframes slide { from { margin-left: 0 } to { margin-left: 60% } }
+  </style>
+
+  <script>
+    // --- Install to home screen (used by lib/core/pwa_web.dart) ---
+    let deferredInstall = null;
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
+    window.addEventListener('appinstalled', () => { deferredInstall = null; });
+    window.mh90CanInstall = () => deferredInstall !== null;
+    window.mh90IsStandalone = () =>
+      window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    window.mh90Install = async () => {
+      if (!deferredInstall) return false;
+      deferredInstall.prompt();
+      const { outcome } = await deferredInstall.userChoice;
+      deferredInstall = null;
+      return outcome === 'accepted';
+    };
+
+    // --- Ask the browser not to evict the local database ---
+    window.mh90StoragePersisted = async () => {
+      if (!navigator.storage || !navigator.storage.persist) return false;
+      return (await navigator.storage.persisted()) || (await navigator.storage.persist());
+    };
+    window.mh90StoragePersisted();
+
+    // --- App lock via the phone's fingerprint / screen lock (WebAuthn) ---
+    // A local-only credential: the browser verifies the user; nothing is sent
+    // to any server.
+    const b64enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const b64dec = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    const rnd = (n) => crypto.getRandomValues(new Uint8Array(n));
+    window.mh90BioAvailable = async () => {
+      try {
+        return !!(window.PublicKeyCredential &&
+          await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+      } catch (_) { return false; }
+    };
+    window.mh90BioRegister = async () => {
+      try {
+        const cred = await navigator.credentials.create({ publicKey: {
+          challenge: rnd(32),
+          rp: { name: 'MyHealth 90' },
+          user: { id: rnd(16), name: 'myhealth90', displayName: 'MyHealth 90' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+          attestation: 'none',
+          timeout: 60000,
+        } });
+        return b64enc(cred.rawId);
+      } catch (_) { return ''; }
+    };
+    window.mh90BioVerify = async (id) => {
+      try {
+        await navigator.credentials.get({ publicKey: {
+          challenge: rnd(32),
+          allowCredentials: [{ type: 'public-key', id: b64dec(id) }],
+          userVerification: 'required',
+          timeout: 60000,
+        } });
+        return true;
+      } catch (_) { return false; }
+    };
+
+    window.mh90NotificationPermission = () =>
+      ('Notification' in window) ? Notification.permission : 'unsupported';
+
+    // --- Offline support ---
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+    }
+  </script>
+</head>
+<body>
+  <div id="splash">
+    <img src="icons/Icon-192.png" alt="">
+    <div>MyHealth 90</div>
+    <div class="bar"></div>
+  </div>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
